@@ -108,7 +108,7 @@ npm run build    # production build
 - Don't add boolean states (`isExpanded`, `isActive`, `isEditing`) — derive from weight
 - Don't use CSS transitions for hover or weight changes — use the rAF loops
 - Don't sort nodes by weight in the treemap — preserve insertion order
-- Don't recalculate row plans when container size changes — they're fixed
+- Row plans: currently fixed from base weights on 1×1 square. Open question: auto-recalculating on container resize might produce better adaptive layouts. The rule is: row plan must NOT change from dynamic weights (hover/click), but MAY adapt to viewport shape.
 - Don't create separate "modes" (view/edit/compact/expanded) — let them emerge from space
 - Don't add navigation (pages, routes, back buttons) — weight redistribution IS navigation
 - Don't filter search results — give them weight instead

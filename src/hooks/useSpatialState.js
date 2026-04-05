@@ -73,6 +73,9 @@ export function useSpatialState(tree) {
         const parentNode = findNode(tree, parentId)
         if (parentNode) {
           const baseWeights = getBaseWeights(parentNode.children)
+          const clickedState = parentState[nodeId]
+          const wasAlreadyBoosted = clickedState && clickedState.target > clickedState.base + 0.5
+
           next[parentId] = applyClick(parentState, nodeId, baseWeights)
 
           // Reset descendants of siblings that lost focus
@@ -80,6 +83,12 @@ export function useSpatialState(tree) {
             if (sibling.id !== nodeId) {
               resetDescendants(next, sibling)
             }
+          }
+
+          // If toggling closed (was boosted, now going back to base), reset own descendants too
+          if (wasAlreadyBoosted) {
+            const clickedNode = findNode(tree, nodeId)
+            if (clickedNode) resetDescendants(next, clickedNode)
           }
         }
       }
