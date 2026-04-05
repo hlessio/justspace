@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useRef, useState, memo } from 'react'
+import { useMemo, useCallback, useRef, memo } from 'react'
 import { SpatialText } from './SpatialText.jsx'
 import { NodeIcon } from './NodeIcon.jsx'
 import { squarify, computeRowPlan } from '../engine/treemap.js'
@@ -19,8 +19,11 @@ export const SpatialNode = memo(function SpatialNode({
   mousePos,
   hoverIntensity,
   onUpdateText,
-  onAddChild,
+  onAddNote,
+  onAddFolder,
   onDeleteNode,
+  // Legacy compat
+  onAddChild,
   forceAutoLayout = false,
   depth = 0,
 }) {
@@ -28,6 +31,7 @@ export const SpatialNode = memo(function SpatialNode({
   const childWeightState = stateByParent[node.id] || {}
   const hasChildNodes = node.children && node.children.length > 0
   const minDim = Math.min(width, height)
+  const isNote = node.type === 'note'
 
   const identityScale = computeScale(width, 'identity', height)
   const contextScale = computeScale(width, 'context', height)
@@ -35,27 +39,29 @@ export const SpatialNode = memo(function SpatialNode({
   const showIdentityText = identityScale.fontSize >= 6 && minDim > 30
   const showContextText = contextScale.opacity > 0 && minDim > 50
   const showDetail = detailScale.opacity > 0 && height > 100 && width > 120
-  const showActions = height > 150 && width > 150 // "+ add" button, etc.
+  const showActions = height > 150 && width > 150
 
-  // Decide if children have enough space to be visible
-  // Children disappear below threshold — parent reclaims all space for its own content
+  // Notes never show children — they use all space for text body
   const MIN_FOR_CHILDREN = 100
-  const childrenWouldFit = hasChildNodes && minDim > MIN_FOR_CHILDREN
+  const childrenWouldFit = !isNote && hasChildNodes && minDim > MIN_FOR_CHILDREN
 
-  // Header adapts
+  // Header
   const textHeight = showIdentityText
     ? identityScale.fontSize * 1.3 + (showContextText ? contextScale.fontSize * 1.3 + 4 : 0)
     : 0
   const headerContentHeight = Math.max(ICON_SIZE + 4, textHeight + 8)
 
-  // Detail area
+  // Detail area — notes get full body, folders get compact detail
   const detailText = node.semanticLayers?.find(l => l.layer === 'detail')?.text || ''
   const hasDetail = detailText && showDetail
-  const detailHeight = hasDetail ? Math.min(height * 0.3, 120) : 0
+  const detailHeight = isNote && hasDetail
+    ? Math.max(0, height - headerContentHeight - 8)  // note body fills all available space
+    : hasDetail ? Math.min(height * 0.3, 120) : 0
 
   let headerHeight
-  if (!childrenWouldFit) {
-    // No visible children — header + detail fill everything
+  if (isNote) {
+    headerHeight = Math.min(height * 0.3, headerContentHeight)
+  } else if (!childrenWouldFit) {
     headerHeight = hasDetail ? Math.min(height * 0.35, headerContentHeight) : height
   } else {
     headerHeight = Math.min(height * 0.25, Math.max(24, headerContentHeight))
@@ -75,7 +81,6 @@ export const SpatialNode = memo(function SpatialNode({
     && childrenRect.width > MIN_CHILD_SIZE
     && childrenRect.height > MIN_CHILD_SIZE
 
-  // Layout: use node.layout if defined (user-arranged), unless forceAutoLayout
   const rowPlan = useMemo(() => {
     if (!canShowChildren) return null
     if (!forceAutoLayout && node.layout) return node.layout
@@ -123,7 +128,7 @@ export const SpatialNode = memo(function SpatialNode({
     }
   }, [node.id, onClickBackground])
 
-  // Editing: the node is editable when it's boosted (user has clicked into it)
+  // Editing: node is editable when boosted
   const ws = stateByParent[parentId]?.[node.id]
   const editing = ws ? ws.current > ws.base + 1.0 : false
 
@@ -138,10 +143,23 @@ export const SpatialNode = memo(function SpatialNode({
     if (onUpdateText) onUpdateText(node.id, 'identity', e.currentTarget.textContent)
   }, [node.id, onUpdateText])
 
-  const handleAddChild = useCallback((e) => {
+  const handleAddNote = useCallback((e) => {
     e.stopPropagation()
-    if (onAddChild) onAddChild(node.id)
-  }, [node.id, onAddChild])
+    if (onAddNote) onAddNote(node.id)
+    else if (onAddChild) onAddChild(node.id) // legacy fallback
+  }, [node.id, onAddNote, onAddChild])
+
+  const handleAddFolder = useCallback((e) => {
+    e.stopPropagation()
+    if (onAddFolder) onAddFolder(node.id)
+  }, [node.id, onAddFolder])
+
+  const handleDelete = useCallback((e) => {
+    e.stopPropagation()
+    if (!onDeleteNode) return
+    if (hasChildNodes && !window.confirm(`Eliminare "${node.label || 'cartella'}" e tutto il contenuto?`)) return
+    onDeleteNode(node.id)
+  }, [node.id, node.label, hasChildNodes, onDeleteNode])
 
   const hoverGlow = mousePos ? computeHoverWeight(mousePos, hoverIntensity, rect) : 0
   const bgAlpha = 0.06 + depth * 0.025 + hoverGlow * 0.12
@@ -244,33 +262,49 @@ export const SpatialNode = memo(function SpatialNode({
           </div>
         )}
 
-        {/* Add child button — emerges when node is large */}
-        {showActions && onAddChild && (
+        {/* Action buttons — only on folders, when node is large enough */}
+        {showActions && !isNote && (
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0, alignItems: 'center' }}>
+            {(onAddNote || onAddChild) && (
+              <div
+                onClick={handleAddNote}
+                title="Nuova nota"
+                style={{ cursor: 'pointer', opacity: 0.4, transition: 'opacity 0.15s', display: 'flex' }}
+                onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+                onMouseLeave={(e) => e.currentTarget.style.opacity = 0.4}
+              >
+                <NodeIcon name="FileText" size={14} color="#667788" />
+              </div>
+            )}
+            {onAddFolder && (
+              <div
+                onClick={handleAddFolder}
+                title="Nuova cartella"
+                style={{ cursor: 'pointer', opacity: 0.4, transition: 'opacity 0.15s', display: 'flex' }}
+                onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+                onMouseLeave={(e) => e.currentTarget.style.opacity = 0.4}
+              >
+                <NodeIcon name="FolderPlus" size={14} color="#667788" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Delete button — appears when editing (node is boosted) */}
+        {editing && showActions && onDeleteNode && (
           <div
-            onClick={handleAddChild}
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#667788',
-              fontSize: 16,
-              cursor: 'pointer',
-              flexShrink: 0,
-              opacity: 0.5,
-              transition: 'opacity 0.15s',
-            }}
+            onClick={handleDelete}
+            title="Elimina"
+            style={{ cursor: 'pointer', opacity: 0.3, transition: 'opacity 0.15s', display: 'flex', flexShrink: 0 }}
             onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
-            onMouseLeave={(e) => e.currentTarget.style.opacity = 0.5}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = 0.3}
           >
-            +
+            <NodeIcon name="Trash2" size={13} color="#887766" />
           </div>
         )}
       </div>
 
-      {/* Detail area — editable only in editing mode */}
+      {/* Detail/body area */}
       {hasDetail && (
         <div
           ref={detailRef}
@@ -300,7 +334,7 @@ export const SpatialNode = memo(function SpatialNode({
         </div>
       )}
 
-      {/* Children treemap */}
+      {/* Children treemap — folders only */}
       {childRects.length > 0 && (
         <div
           style={{
@@ -332,6 +366,8 @@ export const SpatialNode = memo(function SpatialNode({
                 mousePos={mousePos}
                 hoverIntensity={hoverIntensity}
                 onUpdateText={onUpdateText}
+                onAddNote={onAddNote}
+                onAddFolder={onAddFolder}
                 onAddChild={onAddChild}
                 onDeleteNode={onDeleteNode}
                 forceAutoLayout={forceAutoLayout}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createWeightState, applyClick, getTargetWeights } from '../weights.js'
+import { createWeightState, applyClick, getTargetWeights, getBaseWeights } from '../weights.js'
 
 describe('createWeightState', () => {
   it('initializes all nodes at baseWeight', () => {
@@ -16,35 +16,33 @@ describe('createWeightState', () => {
 })
 
 describe('applyClick', () => {
-  it('promotes a node from checkpoint 1 to checkpoint 2', () => {
+  it('boosts clicked node above base', () => {
     const state = createWeightState(['a', 'b', 'c'], { a: 1.0, b: 1.0, c: 1.0 })
     const next = applyClick(state, 'b', { a: 1.0, b: 1.0, c: 1.0 })
-    expect(next.b.target).toBe(2)
+    expect(next.b.target).toBeGreaterThan(1.0)
   })
 
-  it('promotes a node from checkpoint 2 to checkpoint 3', () => {
+  it('returns siblings to base when one is clicked', () => {
     const state = createWeightState(['a', 'b'], { a: 1.0, b: 1.0 })
-    state.b.target = 2
-    state.b.current = 2
     const next = applyClick(state, 'b', { a: 1.0, b: 1.0 })
-    expect(next.b.target).toBe(3)
+    expect(next.a.target).toBe(1.0)
+    expect(next.b.target).toBeGreaterThan(1.0)
   })
 
-  it('demotes a focused node back to checkpoint 2 when clicking another sibling', () => {
+  it('toggles a boosted node back to base', () => {
     const state = createWeightState(['a', 'b'], { a: 1.0, b: 1.0 })
-    state.a.target = 3
-    state.a.current = 3
+    state.b.target = 5.0 // already boosted
     const next = applyClick(state, 'b', { a: 1.0, b: 1.0 })
-    expect(next.a.target).toBeLessThan(3)
-    expect(next.b.target).toBe(2)
+    expect(next.b.target).toBe(1.0)
   })
 
-  it('demotes all children when clicking background (null)', () => {
+  it('resets all to base when clicking background (null)', () => {
     const state = createWeightState(['a', 'b'], { a: 1.0, b: 1.0 })
-    state.a.target = 2
-    state.a.current = 2
+    state.a.target = 5.0
+    state.a.current = 5.0
     const next = applyClick(state, null, { a: 1.0, b: 1.0 })
     expect(next.a.target).toBe(1.0)
+    expect(next.b.target).toBe(1.0)
   })
 })
 
@@ -54,5 +52,15 @@ describe('getTargetWeights', () => {
     state.a.target = 3
     const weights = getTargetWeights(state)
     expect(weights).toEqual({ a: 3, b: 1.0 })
+  })
+})
+
+describe('getBaseWeights', () => {
+  it('extracts baseWeight map from children array', () => {
+    const children = [
+      { id: 'a', baseWeight: 0.5 },
+      { id: 'b', baseWeight: 1.0 },
+    ]
+    expect(getBaseWeights(children)).toEqual({ a: 0.5, b: 1.0 })
   })
 })

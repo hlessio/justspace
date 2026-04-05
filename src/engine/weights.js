@@ -78,3 +78,12 @@ export function getTargetWeights(state) {
   }
   return weights
 }
+
+// Extract baseWeights map from a children array — tree-agnostic utility
+export function getBaseWeights(children) {
+  const weights = {}
+  for (const child of children) {
+    weights[child.id] = child.baseWeight
+  }
+  return weights
+}

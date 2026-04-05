@@ -1,17 +1,22 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { createWeightState, applyClick, ensureBoosted } from '../engine/weights.js'
-import { getBaseWeights } from '../data/defaultTree.js'
+import { createWeightState, applyClick, ensureBoosted, getBaseWeights } from '../engine/weights.js'
 
 const ANIMATION_SPEED = 6   // units per second
 const SETTLE_THRESHOLD = 0.01
 
 export function useSpatialState(tree) {
-  // Build parent map once: nodeId → parentId (for click bubbling)
+  // Build parent map: nodeId → parentId (for click bubbling)
   const parentMapRef = useRef(buildParentMap(tree))
 
   const [stateByParent, setStateByParent] = useState(() => {
     return initWeightStates(tree)
   })
+
+  // Sync weight state when tree changes (nodes added/deleted)
+  useEffect(() => {
+    parentMapRef.current = buildParentMap(tree)
+    setStateByParent(prev => syncWeightStates(tree, prev))
+  }, [tree])
 
   // Single rAF loop — animates all current values toward their targets
   const stateRef = useRef(stateByParent)
@@ -161,6 +166,28 @@ function initWeightStates(node) {
     }
   }
   return states
+}
+
+// Sync existing weight state with current tree — add new nodes, keep existing animations
+function syncWeightStates(tree, existing) {
+  const fresh = initWeightStates(tree)
+  const merged = {}
+
+  for (const [parentId, freshWeights] of Object.entries(fresh)) {
+    const existingWeights = existing[parentId]
+    if (!existingWeights) {
+      // New parent — use fresh state
+      merged[parentId] = freshWeights
+    } else {
+      // Existing parent — merge: keep existing entries, add new ones
+      merged[parentId] = {}
+      for (const [nodeId, freshW] of Object.entries(freshWeights)) {
+        merged[parentId][nodeId] = existingWeights[nodeId] || freshW
+      }
+    }
+  }
+
+  return merged
 }
 
 // Reset all children weights inside a node (and recursively their children)

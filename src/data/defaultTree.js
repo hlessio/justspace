@@ -180,11 +180,3 @@ export const defaultTree = {
     },
   ],
 }
-
-export function getBaseWeights(children) {
-  const weights = {}
-  for (const child of children) {
-    weights[child.id] = child.baseWeight
-  }
-  return weights
-}
