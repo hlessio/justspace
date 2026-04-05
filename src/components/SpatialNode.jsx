@@ -38,7 +38,10 @@ export const SpatialNode = memo(function SpatialNode({
   const detailScale = computeScale(width, 'detail', height)
   const showIdentityText = identityScale.fontSize >= 6 && minDim > 30
   const showContextText = contextScale.opacity > 0 && minDim > 50
-  const showDetail = detailScale.opacity > 0 && height > 100 && width > 120
+  // Notes show body much earlier — it's the main content
+  const showDetail = isNote
+    ? height > 50 && width > 60
+    : detailScale.opacity > 0 && height > 100 && width > 120
   const showActions = height > 150 && width > 150
 
   // Notes never show children — they use all space for text body
@@ -347,7 +350,7 @@ export const SpatialNode = memo(function SpatialNode({
         )}
       </div>
 
-      {/* Detail/body area */}
+      {/* Detail/body area — notes get full opacity and readable font */}
       {hasDetail && editing && (
         <div
           ref={detailRef}
@@ -361,10 +364,10 @@ export const SpatialNode = memo(function SpatialNode({
             top: detailTop + 2,
             width: width - 16,
             height: detailHeight - 4,
-            fontSize: detailScale.fontSize,
-            lineHeight: `${detailScale.fontSize * 1.5}px`,
-            color: '#8899aa',
-            opacity: detailScale.opacity,
+            fontSize: isNote ? Math.max(13, detailScale.fontSize) : detailScale.fontSize,
+            lineHeight: isNote ? '1.6' : `${detailScale.fontSize * 1.5}px`,
+            color: isNote ? '#b0bcc8' : '#8899aa',
+            opacity: isNote ? 1 : detailScale.opacity,
             padding: '4px 0',
             outline: 'none',
             cursor: 'text',
@@ -382,10 +385,10 @@ export const SpatialNode = memo(function SpatialNode({
             top: detailTop + 2,
             width: width - 16,
             height: detailHeight - 4,
-            fontSize: detailScale.fontSize,
-            lineHeight: `${detailScale.fontSize * 1.5}px`,
-            color: '#8899aa',
-            opacity: detailScale.opacity,
+            fontSize: isNote ? Math.max(12, detailScale.fontSize) : detailScale.fontSize,
+            lineHeight: isNote ? '1.6' : `${detailScale.fontSize * 1.5}px`,
+            color: isNote ? '#99a8b8' : '#8899aa',
+            opacity: isNote ? 0.9 : detailScale.opacity,
             padding: '4px 0',
             overflow: 'hidden',
             whiteSpace: 'pre-wrap',

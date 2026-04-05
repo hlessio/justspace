@@ -18,18 +18,22 @@ export function useSpatialState(tree) {
     setStateByParent(prev => syncWeightStates(tree, prev))
   }, [tree])
 
-  // Single rAF loop — animates all current values toward their targets
+  // rAF loop — only runs when weights are animating, stops when settled
   const stateRef = useRef(stateByParent)
   stateRef.current = stateByParent
+  const rafRef = useRef(null)
+  const animatingRef = useRef(false)
+  const lastTimeRef = useRef(Date.now())
 
-  useEffect(() => {
-    let raf
-    let lastTime = Date.now()
+  const startAnimation = useCallback(() => {
+    if (animatingRef.current) return
+    animatingRef.current = true
+    lastTimeRef.current = Date.now()
 
     const tick = () => {
       const now = Date.now()
-      const dt = (now - lastTime) / 1000
-      lastTime = now
+      const dt = (now - lastTimeRef.current) / 1000
+      lastTimeRef.current = now
 
       const state = stateRef.current
       let anyMoving = false
@@ -41,7 +45,6 @@ export function useSpatialState(tree) {
           if (Math.abs(diff) > SETTLE_THRESHOLD) {
             if (!nextState) nextState = deepCloneState(state)
             const remaining = Math.abs(diff)
-            // Ease-in-out: fast in middle, gentle at edges
             const rate = (0.1 + remaining * 0.9) * ANIMATION_SPEED * dt
             nextState[parentId][nodeId].current += Math.sign(diff) * Math.min(rate, remaining)
             anyMoving = true
@@ -54,11 +57,19 @@ export function useSpatialState(tree) {
         setStateByParent(nextState)
       }
 
-      raf = requestAnimationFrame(tick)
+      if (anyMoving) {
+        rafRef.current = requestAnimationFrame(tick)
+      } else {
+        animatingRef.current = false
+        rafRef.current = null
+      }
     }
 
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    rafRef.current = requestAnimationFrame(tick)
+  }, [])
+
+  useEffect(() => {
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
   }, [])
 
   const handleClickNode = useCallback((nodeId, parentId) => {
@@ -95,8 +106,8 @@ export function useSpatialState(tree) {
 
       // 2. Bubble up: amplify ancestors with increasing boost per depth level.
       //    Deeper clicks = ancestors take more space. Never toggles — only expands.
-      const DEPTH_BOOST_BASE = 4.0
-      const DEPTH_BOOST_STEP = 4.0 // each level deeper adds this much more — exponential dominance
+      const DEPTH_BOOST_BASE = 10.0
+      const DEPTH_BOOST_STEP = 8.0 // each level deeper adds aggressively — deep focus dominates
       let currentId = parentId
       let grandparentId = parentMap[currentId]
       let depthFromClick = 1
@@ -118,7 +129,8 @@ export function useSpatialState(tree) {
 
       return next
     })
-  }, [tree])
+    startAnimation()
+  }, [tree, startAnimation])
 
   const handleClickBackground = useCallback((parentId) => {
     setStateByParent(prev => {
@@ -138,7 +150,8 @@ export function useSpatialState(tree) {
       }
       return next
     })
-  }, [tree])
+    startAnimation()
+  }, [tree, startAnimation])
 
   // Focus a node by id — same as clicking it, but you don't need to know the parentId
   const focusNode = useCallback((nodeId) => {

@@ -2,7 +2,7 @@
 // Click = boost the clicked node, siblings return to base.
 // Everything animates smoothly via rAF.
 
-const CLICK_BOOST = 4.0
+const CLICK_BOOST = 8.0
 
 export function createWeightState(ids, baseWeights) {
   const state = {}

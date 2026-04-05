@@ -77,8 +77,20 @@ async function readFileAsNote(fileHandle, id) {
   const content = await file.text()
   const { frontmatter, body } = parseFrontmatter(content)
 
-  // Title comes from frontmatter, or filename without .md
-  const title = frontmatter.title || fileHandle.name.replace(/\.md$/, '')
+  // Title priority: frontmatter.title → first # heading → filename
+  let title = frontmatter.title || ''
+  let bodyText = body
+
+  if (!title) {
+    // Check for # heading as first line
+    const headingMatch = bodyText.match(/^#\s+(.+)/)
+    if (headingMatch) {
+      title = headingMatch[1].trim()
+      bodyText = bodyText.slice(headingMatch[0].length).trim()
+    } else {
+      title = fileHandle.name.replace(/\.md$/, '')
+    }
+  }
 
   return {
     id,
@@ -88,11 +100,12 @@ async function readFileAsNote(fileHandle, id) {
     baseWeight: frontmatter.weight || DEFAULT_NOTE_WEIGHT,
     semanticLayers: [
       { layer: 'identity', text: title },
-      { layer: 'detail', text: body.trim() },
+      { layer: 'detail', text: bodyText.trim() },
     ],
     children: [],
     _handle: fileHandle,
     _fileName: fileHandle.name,
+    _hasFrontmatter: Object.keys(frontmatter).length > 0,
   }
 }
 
@@ -115,11 +128,17 @@ export async function saveNote(node) {
   const title = node.semanticLayers?.find(l => l.layer === 'identity')?.text || node.label
   const body = node.semanticLayers?.find(l => l.layer === 'detail')?.text || ''
 
-  const frontmatter = { title }
-  if (node.icon && node.icon !== 'FileText') frontmatter.icon = node.icon
-  if (node.baseWeight !== DEFAULT_NOTE_WEIGHT) frontmatter.weight = node.baseWeight
+  let content
+  if (node._hasFrontmatter === false) {
+    // Obsidian-style: no frontmatter, just # heading + body
+    content = `# ${title}\n\n${body}`
+  } else {
+    const frontmatter = { title }
+    if (node.icon && node.icon !== 'FileText') frontmatter.icon = node.icon
+    if (node.baseWeight !== DEFAULT_NOTE_WEIGHT) frontmatter.weight = node.baseWeight
+    content = serializeFrontmatter(frontmatter, body)
+  }
 
-  const content = serializeFrontmatter(frontmatter, body)
   const writable = await node._handle.createWritable()
   await writable.write(content)
   await writable.close()
