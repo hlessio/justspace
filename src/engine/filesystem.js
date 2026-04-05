@@ -4,6 +4,7 @@ import YAML from 'yaml'
 // Reads a directory into a spatial tree, writes changes back as .md files
 // Folders = directories, Notes = .md files
 // Metadata (icon, weight, layout) lives in YAML frontmatter
+// Title = filename, Body = .md content
 
 const DEFAULT_NOTE_WEIGHT = 0.3
 const DEFAULT_FOLDER_WEIGHT = 0.8
@@ -19,7 +20,6 @@ export async function pickDirectory() {
 // ─── Read directory → spatial tree ────────────────────────
 
 export async function readDirectoryAsTree(dirHandle, id = 'root', depth = 0) {
-  // Read .folder.md for folder metadata
   const folderMeta = await readFolderMeta(dirHandle)
 
   const node = {
@@ -33,7 +33,7 @@ export async function readDirectoryAsTree(dirHandle, id = 'root', depth = 0) {
     ],
     layout: folderMeta.layout || undefined,
     children: [],
-    _handle: dirHandle, // keep handle for writes
+    _handle: dirHandle,
   }
 
   const entries = []
@@ -41,14 +41,12 @@ export async function readDirectoryAsTree(dirHandle, id = 'root', depth = 0) {
     entries.push(entry)
   }
 
-  // Sort: directories first, then files, both alphabetical
   entries.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
     return a.name.localeCompare(b.name)
   })
 
   for (const entry of entries) {
-    // Skip hidden files and .folder.md
     if (entry.name.startsWith('.')) continue
 
     if (entry.kind === 'directory') {
@@ -62,7 +60,6 @@ export async function readDirectoryAsTree(dirHandle, id = 'root', depth = 0) {
     }
   }
 
-  // Update context with count
   const noteCount = node.children.filter(c => c.type === 'note').length
   const folderCount = node.children.filter(c => c.type === 'folder').length
   const parts = []
@@ -80,6 +77,7 @@ async function readFileAsNote(fileHandle, id) {
   const content = await file.text()
   const { frontmatter, body } = parseFrontmatter(content)
 
+  // Title comes from frontmatter, or filename without .md
   const title = frontmatter.title || fileHandle.name.replace(/\.md$/, '')
 
   return {
@@ -127,6 +125,40 @@ export async function saveNote(node) {
   await writable.close()
 }
 
+// Rename a note file on disk when title changes.
+// Creates new file, copies content, deletes old. Returns updated node fields.
+export async function renameNoteFile(node, parentHandle, newTitle) {
+  if (!node._handle || !parentHandle) return null
+
+  const newFileName = sanitizeFileName(newTitle || '') + '.md'
+  const oldFileName = node._fileName
+
+  // Skip if name hasn't changed
+  if (newFileName === oldFileName) return null
+
+  // Read current content
+  const file = await node._handle.getFile()
+  const content = await file.text()
+
+  // Create new file with new name
+  const newHandle = await parentHandle.getFileHandle(newFileName, { create: true })
+  const writable = await newHandle.createWritable()
+  await writable.write(content)
+  await writable.close()
+
+  // Delete old file
+  try {
+    await parentHandle.removeEntry(oldFileName)
+  } catch (e) {
+    console.warn('Failed to delete old file during rename:', e)
+  }
+
+  return {
+    _handle: newHandle,
+    _fileName: newFileName,
+  }
+}
+
 export async function saveFolderMeta(node) {
   if (!node._handle) return
   const frontmatter = {}
@@ -135,7 +167,6 @@ export async function saveFolderMeta(node) {
   if (node.baseWeight !== DEFAULT_FOLDER_WEIGHT) frontmatter.weight = node.baseWeight
   if (node.layout) frontmatter.layout = node.layout
 
-  // Only write .folder.md if there's something to save
   if (Object.keys(frontmatter).length === 0) return
 
   const content = serializeFrontmatter(frontmatter, '')
@@ -145,12 +176,19 @@ export async function saveFolderMeta(node) {
   await writable.close()
 }
 
-export async function createNoteFile(parentNode, title = 'Senza titolo') {
+export async function createNoteFile(parentNode, title) {
   if (!parentNode._handle) return null
-  const fileName = sanitizeFileName(title) + '.md'
+
+  // Unique filename: use title if provided, otherwise timestamp-based
+  const displayTitle = title || ''
+  const fileName = (title ? sanitizeFileName(title) : `nota-${Date.now()}`) + '.md'
+
   const fileHandle = await parentNode._handle.getFileHandle(fileName, { create: true })
 
-  const content = serializeFrontmatter({ title }, '')
+  const frontmatter = {}
+  if (displayTitle) frontmatter.title = displayTitle
+
+  const content = serializeFrontmatter(frontmatter, '')
   const writable = await fileHandle.createWritable()
   await writable.write(content)
   await writable.close()
@@ -158,11 +196,11 @@ export async function createNoteFile(parentNode, title = 'Senza titolo') {
   return {
     id: `${parentNode.id}/${fileName}`,
     type: 'note',
-    label: title,
+    label: displayTitle,
     icon: 'FileText',
     baseWeight: DEFAULT_NOTE_WEIGHT,
     semanticLayers: [
-      { layer: 'identity', text: title },
+      { layer: 'identity', text: displayTitle },
       { layer: 'detail', text: '' },
     ],
     children: [],
@@ -171,19 +209,22 @@ export async function createNoteFile(parentNode, title = 'Senza titolo') {
   }
 }
 
-export async function createSubfolder(parentNode, name = 'Nuova cartella') {
+export async function createSubfolder(parentNode, name) {
   if (!parentNode._handle) return null
-  const dirName = sanitizeFileName(name)
+
+  const displayName = name || ''
+  const dirName = name ? sanitizeFileName(name) : `cartella-${Date.now()}`
+
   const dirHandle = await parentNode._handle.getDirectoryHandle(dirName, { create: true })
 
   return {
     id: `${parentNode.id}/${dirName}`,
     type: 'folder',
-    label: name,
+    label: displayName,
     icon: 'Folder',
     baseWeight: DEFAULT_FOLDER_WEIGHT,
     semanticLayers: [
-      { layer: 'identity', text: name },
+      { layer: 'identity', text: displayName },
     ],
     children: [],
     _handle: dirHandle,
@@ -228,5 +269,5 @@ function sanitizeFileName(name) {
     .replace(/[<>:"/\\|?*]/g, '')
     .replace(/\s+/g, '-')
     .toLowerCase()
-    .slice(0, 100) || 'untitled'
+    .slice(0, 100) || `untitled-${Date.now()}`
 }

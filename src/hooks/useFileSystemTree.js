@@ -1,9 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   pickDirectory,
   readDirectoryAsTree,
   saveNote,
   saveFolderMeta,
+  renameNoteFile,
   createNoteFile,
   createSubfolder,
   deleteEntry,
@@ -18,6 +19,7 @@ export function useFileSystemTree() {
   const [dirName, setDirName] = useState(null)
   const saveTimers = useRef({})
   const treeRef = useRef(null)
+  const creatingRef = useRef(false) // lock for concurrent creation
   treeRef.current = tree
 
   // Open a directory
@@ -75,6 +77,7 @@ export function useFileSystemTree() {
   }, [])
 
   // Update text — saves to file system with debounce
+  // When title (identity) changes on a note, also renames the file
   const updateNodeText = useCallback((nodeId, layerName, newText) => {
     setTree(prev => {
       if (!prev) return prev
@@ -94,50 +97,91 @@ export function useFileSystemTree() {
     saveTimers.current[nodeId] = setTimeout(async () => {
       const node = findNode(nodeId)
       if (!node) return
-      if (node.type === 'note') {
-        await saveNote(node)
-      } else if (node.type === 'folder') {
-        await saveFolderMeta(node)
+
+      try {
+        if (node.type === 'note') {
+          // Save content first
+          await saveNote(node)
+
+          // If title changed, rename the file
+          if (layerName === 'identity' && newText) {
+            const parent = findParent(nodeId)
+            if (parent?._handle) {
+              const result = await renameNoteFile(node, parent._handle, newText)
+              if (result) {
+                // Update the node's handle and fileName in the tree
+                setTree(prev => {
+                  if (!prev) return prev
+                  const next = cloneTree(prev)
+                  const n = findInClone(next, nodeId)
+                  if (n) {
+                    n._handle = result._handle
+                    n._fileName = result._fileName
+                  }
+                  return next
+                })
+              }
+            }
+          }
+        } else if (node.type === 'folder') {
+          await saveFolderMeta(node)
+        }
+      } catch (e) {
+        console.warn('Failed to save:', e)
       }
     }, SAVE_DEBOUNCE)
-  }, [findNode])
+  }, [findNode, findParent])
 
-  // Add note
+  // Add note — with creation lock
   const addNote = useCallback(async (parentId) => {
-    const parent = findNode(parentId)
-    if (!parent || !parent._handle) return
+    if (creatingRef.current) return
+    creatingRef.current = true
 
-    const noteNode = await createNoteFile(parent, '')
-    if (!noteNode) return
+    try {
+      const parent = findNode(parentId)
+      if (!parent?._handle) return
 
-    setTree(prev => {
-      if (!prev) return prev
-      const next = cloneTree(prev)
-      const parentClone = findInClone(next, parentId)
-      if (parentClone) {
-        parentClone.children.push(noteNode)
-      }
-      return next
-    })
+      const noteNode = await createNoteFile(parent, '')
+      if (!noteNode) return
+
+      setTree(prev => {
+        if (!prev) return prev
+        const next = cloneTree(prev)
+        const parentClone = findInClone(next, parentId)
+        if (parentClone) parentClone.children.push(noteNode)
+        return next
+      })
+    } catch (e) {
+      console.warn('Failed to create note:', e)
+    } finally {
+      creatingRef.current = false
+    }
   }, [findNode])
 
-  // Add folder
+  // Add folder — with creation lock
   const addFolder = useCallback(async (parentId) => {
-    const parent = findNode(parentId)
-    if (!parent || !parent._handle) return
+    if (creatingRef.current) return
+    creatingRef.current = true
 
-    const folderNode = await createSubfolder(parent, '')
-    if (!folderNode) return
+    try {
+      const parent = findNode(parentId)
+      if (!parent?._handle) return
 
-    setTree(prev => {
-      if (!prev) return prev
-      const next = cloneTree(prev)
-      const parentClone = findInClone(next, parentId)
-      if (parentClone) {
-        parentClone.children.push(folderNode)
-      }
-      return next
-    })
+      const folderNode = await createSubfolder(parent, '')
+      if (!folderNode) return
+
+      setTree(prev => {
+        if (!prev) return prev
+        const next = cloneTree(prev)
+        const parentClone = findInClone(next, parentId)
+        if (parentClone) parentClone.children.push(folderNode)
+        return next
+      })
+    } catch (e) {
+      console.warn('Failed to create folder:', e)
+    } finally {
+      creatingRef.current = false
+    }
   }, [findNode])
 
   // Delete node
@@ -146,7 +190,11 @@ export function useFileSystemTree() {
     const parent = findParent(nodeId)
     if (!node || !parent) return
 
-    await deleteEntry(node, parent)
+    try {
+      await deleteEntry(node, parent)
+    } catch (e) {
+      console.warn('Failed to delete from disk:', e)
+    }
 
     setTree(prev => {
       if (!prev) return prev
@@ -170,10 +218,13 @@ export function useFileSystemTree() {
   }
 }
 
-// Deep clone preserving _handle refs
+// Deep clone — explicitly preserves _handle, _fileName, type
 function cloneTree(node) {
   return {
     ...node,
+    _handle: node._handle,
+    _fileName: node._fileName,
+    type: node.type,
     semanticLayers: node.semanticLayers?.map(l => ({ ...l })),
     children: node.children?.map(c => cloneTree(c)) || [],
   }

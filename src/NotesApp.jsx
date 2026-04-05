@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { SpatialNode } from './components/SpatialNode.jsx'
-import { squarify, computeRowPlan } from './engine/treemap.js'
 import { useTree } from './hooks/useTree.js'
 import { useFileSystemTree } from './hooks/useFileSystemTree.js'
 import { defaultNotesTree } from './data/defaultNotesTree.js'
 import { useSpatialState } from './hooks/useSpatialState.js'
-import { useHover, computeHoverWeight } from './hooks/useHover.js'
+import { useHover } from './hooks/useHover.js'
 import { NodeIcon } from './components/NodeIcon.jsx'
 
 const SEARCH_HEIGHT = 52
@@ -14,7 +13,6 @@ const PADDING = 8
 export default function NotesApp() {
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight })
   const [search, setSearch] = useState('')
-  const [autoLayout, setAutoLayout] = useState(false)
 
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight })
@@ -67,46 +65,13 @@ export default function NotesApp() {
     }
   }, [search, findMatchingNodes, focusNode, handleClickBackground, tree.id])
 
-  // Layout
-  const containerRect = {
+  // The root folder IS the spatial field — rendered as a single SpatialNode that fills the viewport
+  const rootRect = {
     x: PADDING,
     y: SEARCH_HEIGHT + PADDING,
     width: viewport.width - PADDING * 2,
     height: viewport.height - SEARCH_HEIGHT - PADDING * 2,
   }
-
-  const rowPlan = useMemo(() => {
-    if (!autoLayout && tree.layout) return tree.layout
-    const baseItems = tree.children.map(c => ({ id: c.id, weight: c.baseWeight }))
-    return computeRowPlan(baseItems)
-  }, [tree.children, tree.layout, autoLayout])
-
-  const rootWeightState = stateByParent[tree.id] || {}
-  const baseRects = useMemo(() => {
-    const weights = tree.children.map(child => {
-      const ws = rootWeightState[child.id]
-      return { id: child.id, weight: ws ? ws.current : child.baseWeight }
-    })
-    return squarify(weights, containerRect, rowPlan)
-  }, [rootWeightState, containerRect.width, containerRect.height, rowPlan, tree.children])
-
-  const rects = useMemo(() => {
-    if (!mousePos || hoverIntensity <= 0) return baseRects
-    const weights = tree.children.map(child => {
-      const ws = rootWeightState[child.id]
-      const current = ws ? ws.current : child.baseWeight
-      const rect = baseRects.find(r => r.id === child.id)
-      const hover = rect ? computeHoverWeight(mousePos, hoverIntensity, rect) : 0
-      return { id: child.id, weight: current + hover }
-    })
-    return squarify(weights, containerRect, rowPlan)
-  }, [baseRects, mousePos, hoverIntensity, rootWeightState, containerRect.width, containerRect.height, rowPlan, tree.children])
-
-  const nodeMap = useMemo(() => {
-    const map = {}
-    for (const child of tree.children) map[child.id] = child
-    return map
-  }, [tree.children])
 
   return (
     <div
@@ -118,9 +83,6 @@ export default function NotesApp() {
         position: 'relative',
       }}
       onMouseMove={onMouseMove}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) handleClickBackground(tree.id)
-      }}
     >
       {/* Search bar */}
       <div style={{
@@ -152,20 +114,6 @@ export default function NotesApp() {
           {useFS ? fs.dirName : 'Apri cartella'}
         </div>
 
-        {/* Layout toggle */}
-        <div
-          onClick={() => setAutoLayout(prev => !prev)}
-          style={{
-            padding: '4px 8px', borderRadius: 4, fontSize: 11,
-            color: autoLayout ? '#9aabbf' : '#556677', cursor: 'pointer',
-            border: `1px solid rgba(140, 180, 255, ${autoLayout ? 0.2 : 0.08})`,
-            background: autoLayout ? 'rgba(140, 160, 200, 0.1)' : 'none',
-            whiteSpace: 'nowrap', userSelect: 'none',
-          }}
-        >
-          {autoLayout ? 'auto' : 'lista'}
-        </div>
-
         {/* Refresh */}
         {useFS && (
           <div
@@ -190,29 +138,21 @@ export default function NotesApp() {
         </div>
       )}
 
-      {/* Spatial field */}
-      {rects.map(rect => {
-        const node = nodeMap[rect.id]
-        if (!node) return null
-        return (
-          <SpatialNode
-            key={rect.id}
-            node={node}
-            rect={{ x: rect.x, y: rect.y, width: rect.width - 4, height: rect.height - 4 }}
-            parentId={tree.id}
-            stateByParent={stateByParent}
-            onClickNode={handleClickNode}
-            onClickBackground={handleClickBackground}
-            mousePos={mousePos}
-            hoverIntensity={hoverIntensity}
-            onUpdateText={updateNodeText}
-            onAddNote={addNote}
-            onAddFolder={addFolder}
-            onDeleteNode={deleteNode}
-            forceAutoLayout={autoLayout}
-          />
-        )
-      })}
+      {/* The root folder as a single spatial node — everything inside it */}
+      <SpatialNode
+        node={tree}
+        rect={rootRect}
+        parentId={null}
+        stateByParent={stateByParent}
+        onClickNode={handleClickNode}
+        onClickBackground={handleClickBackground}
+        mousePos={mousePos}
+        hoverIntensity={hoverIntensity}
+        onUpdateText={updateNodeText}
+        onAddNote={addNote}
+        onAddFolder={addFolder}
+        onDeleteNode={deleteNode}
+      />
     </div>
   )
 }
