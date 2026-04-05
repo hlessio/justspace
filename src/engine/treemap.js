@@ -1,88 +1,106 @@
-// Squarified Treemap Algorithm
-// Reference: Bruls, Huizing, van Wijk (2000)
-// Input: array of { id, weight }, container rect { x, y, width, height }
-// Output: array of { id, x, y, width, height }
+// Stable Grid Layout
+// Two-phase:
+//   1. computeRowPlan() — determines row groupings from BASE weights (called once)
+//   2. layoutWithPlan() — distributes space using CURRENT weights (called every frame)
+// Row assignments NEVER change — nodes expand/compress within their row.
 
-export function squarify(items, rect) {
+// Phase 1: compute the fixed row plan from base weights
+// Uses a normalized square (1×1) so the plan is INDEPENDENT of container size.
+export function computeRowPlan(items) {
+  if (items.length <= 1) return null // no plan needed for 0-1 items
+
+  const n = items.length
+  const refRect = { width: 1, height: 1 } // normalized — size doesn't matter
+  let bestRows = [items.map(i => i.id)]
+  let bestScore = Infinity
+
+  for (let numRows = 1; numRows <= Math.min(n, 5); numRows++) {
+    const groups = splitIntoRows(items, numRows)
+    const score = scoreRowLayout(groups, refRect)
+    if (score < bestScore) {
+      bestScore = score
+      bestRows = groups.map(row => row.map(i => i.id))
+    }
+  }
+
+  return bestRows // array of arrays of ids
+}
+
+// Phase 2: layout using current weights but fixed row plan
+export function squarify(items, rect, rowPlan) {
   if (items.length === 0) return []
   if (items.length === 1) {
     return [{ id: items[0].id, x: rect.x, y: rect.y, width: rect.width, height: rect.height }]
   }
 
-  const totalWeight = items.reduce((sum, item) => sum + item.weight, 0)
-  if (totalWeight <= 0) return []
+  // Build weight lookup
+  const weightMap = {}
+  for (const item of items) weightMap[item.id] = item.weight
 
-  const totalArea = rect.width * rect.height
-  const nodes = items
-    .map(item => ({ id: item.id, area: (item.weight / totalWeight) * totalArea }))
-    .sort((a, b) => b.area - a.area)
+  // Use the fixed row plan, or fall back to computing one
+  const idRows = rowPlan || computeRowPlan(items, rect) || [items.map(i => i.id)]
 
+  // Compute row heights proportional to total weight in each row
+  const rowTotalWeights = idRows.map(ids =>
+    ids.reduce((sum, id) => sum + (weightMap[id] || 0.1), 0)
+  )
+  const totalRowWeight = rowTotalWeights.reduce((s, w) => s + w, 0)
+  const rowHeights = rowTotalWeights.map(w =>
+    (w / totalRowWeight) * rect.height
+  )
+
+  // Lay out each row
   const result = []
-  layoutRows(nodes, rect, result)
+  let y = rect.y
+
+  for (let r = 0; r < idRows.length; r++) {
+    const ids = idRows[r]
+    const rowHeight = rowHeights[r]
+    const rowTotalW = rowTotalWeights[r]
+
+    let x = rect.x
+    for (const id of ids) {
+      const w = ((weightMap[id] || 0.1) / rowTotalW) * rect.width
+      result.push({ id, x, y, width: w, height: rowHeight })
+      x += w
+    }
+
+    y += rowHeight
+  }
+
   return result
 }
 
-function layoutRows(nodes, rect, result) {
-  if (nodes.length === 0) return
-
-  const { x, y, width, height } = rect
-  const isHorizontal = width >= height
-  const side = isHorizontal ? width : height
-
-  let row = []
-  let rowArea = 0
-  let remaining = [...nodes]
-
-  row.push(remaining.shift())
-  rowArea = row[0].area
-
-  let bestWorst = worstAspectRatio(row, rowArea, side)
-
-  while (remaining.length > 0) {
-    const next = remaining[0]
-    const newRowArea = rowArea + next.area
-    const newRow = [...row, next]
-    const newWorst = worstAspectRatio(newRow, newRowArea, side)
-
-    if (newWorst <= bestWorst) {
-      row = newRow
-      rowArea = newRowArea
-      bestWorst = newWorst
-      remaining.shift()
-    } else {
-      break
-    }
+function splitIntoRows(items, numRows) {
+  const n = items.length
+  const rows = []
+  const perRow = Math.ceil(n / numRows)
+  for (let i = 0; i < n; i += perRow) {
+    rows.push(items.slice(i, i + perRow))
   }
-
-  const rowLength = rowArea / side
-  let offset = 0
-
-  for (const node of row) {
-    const nodeLength = node.area / rowLength
-
-    if (isHorizontal) {
-      result.push({ id: node.id, x: x + offset, y, width: nodeLength, height: rowLength })
-    } else {
-      result.push({ id: node.id, x, y: y + offset, width: rowLength, height: nodeLength })
-    }
-    offset += nodeLength
-  }
-
-  if (remaining.length > 0) {
-    const newRect = isHorizontal
-      ? { x, y: y + rowLength, width, height: height - rowLength }
-      : { x: x + rowLength, y, width: width - rowLength, height }
-    layoutRows(remaining, newRect, result)
-  }
+  return rows
 }
 
-function worstAspectRatio(row, rowArea, side) {
-  const rowLength = rowArea / side
-  let worst = 0
-  for (const node of row) {
-    const nodeLength = node.area / rowLength
-    const ratio = Math.max(rowLength / nodeLength, nodeLength / rowLength)
-    if (ratio > worst) worst = ratio
+function scoreRowLayout(rows, rect) {
+  const rowTotalWeights = rows.map(row =>
+    row.reduce((sum, item) => sum + item.weight, 0)
+  )
+  const sumRowWeights = rowTotalWeights.reduce((s, w) => s + w, 0)
+  let totalScore = 0
+  let count = 0
+
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r]
+    const rowHeight = (rowTotalWeights[r] / sumRowWeights) * rect.height
+    const rowTotalW = rowTotalWeights[r]
+
+    for (const item of row) {
+      const cellWidth = (item.weight / rowTotalW) * rect.width
+      const ratio = Math.max(cellWidth / rowHeight, rowHeight / cellWidth)
+      totalScore += ratio
+      count++
+    }
   }
-  return worst
+
+  return totalScore / count
 }

@@ -1,54 +1,70 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, memo } from 'react'
 import { SpatialText } from './SpatialText.jsx'
-import { squarify } from '../engine/treemap.js'
+import { squarify, computeRowPlan } from '../engine/treemap.js'
+import { computeHoverWeight } from '../hooks/useHover.js'
 
 const NODE_GAP = 2
 const MIN_CHILD_SIZE = 20
 
-export function SpatialNode({
+export const SpatialNode = memo(function SpatialNode({
   node,
   rect,
   parentId,
   stateByParent,
   onClickNode,
   onClickBackground,
-  hoveredId,
+  mousePos,
   hoverIntensity,
-  onMouseEnter,
-  onMouseLeave,
-  onMouseMove,
   depth = 0,
 }) {
   const { x, y, width, height } = rect
 
   const childWeightState = stateByParent[node.id] || {}
 
-  const childWeights = useMemo(() => {
-    if (!node.children || node.children.length === 0) return []
-    return node.children.map(child => {
-      const ws = childWeightState[child.id]
-      const current = ws ? ws.current : child.baseWeight
-      const hover = hoveredId === child.id ? hoverIntensity : 0
-      return { id: child.id, weight: current + hover }
-    })
-  }, [node.children, childWeightState, hoveredId, hoverIntensity])
-
   const headerHeight = Math.min(height * 0.3, 60)
+  const childAreaOrigin = { x: x + NODE_GAP, y: y + headerHeight + NODE_GAP }
   const childrenRect = {
-    x: x + NODE_GAP,
-    y: y + headerHeight + NODE_GAP,
+    ...childAreaOrigin,
     width: Math.max(0, width - NODE_GAP * 2),
     height: Math.max(0, height - headerHeight - NODE_GAP * 2),
   }
 
-  const showChildren = childWeights.length > 0
+  const hasChildren = node.children && node.children.length > 0
     && childrenRect.width > MIN_CHILD_SIZE
     && childrenRect.height > MIN_CHILD_SIZE
 
+  // Row plan: computed ONCE from base weights — fixed layout structure
+  // Independent of container size — never changes when parent resizes
+  const rowPlan = useMemo(() => {
+    if (!hasChildren) return null
+    const baseItems = node.children.map(c => ({ id: c.id, weight: c.baseWeight }))
+    return computeRowPlan(baseItems)
+  }, [hasChildren, node.children])
+
+  // Base rects from click weights (for hover distance calc)
+  const baseChildRects = useMemo(() => {
+    if (!hasChildren) return []
+    const weights = node.children.map(child => {
+      const ws = childWeightState[child.id]
+      return { id: child.id, weight: ws ? ws.current : child.baseWeight }
+    })
+    return squarify(weights, childrenRect, rowPlan)
+  }, [hasChildren, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
+
+  // Final rects with gaussian hover
   const childRects = useMemo(() => {
-    if (!showChildren) return []
-    return squarify(childWeights, childrenRect)
-  }, [showChildren, childWeights, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height])
+    if (!hasChildren) return []
+    if (!mousePos || hoverIntensity <= 0) return baseChildRects
+
+    const weights = node.children.map(child => {
+      const ws = childWeightState[child.id]
+      const current = ws ? ws.current : child.baseWeight
+      const baseRect = baseChildRects.find(r => r.id === child.id)
+      const hover = baseRect ? computeHoverWeight(mousePos, hoverIntensity, baseRect) : 0
+      return { id: child.id, weight: current + hover }
+    })
+    return squarify(weights, childrenRect, rowPlan)
+  }, [hasChildren, baseChildRects, mousePos, hoverIntensity, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
 
   const childNodeMap = useMemo(() => {
     const map = {}
@@ -68,8 +84,9 @@ export function SpatialNode({
     }
   }, [node.id, onClickBackground])
 
-  const bgAlpha = 0.08 + depth * 0.03
-  const borderAlpha = hoveredId === node.id ? 0.15 + hoverIntensity * 0.5 : 0.12
+  const hoverGlow = mousePos ? computeHoverWeight(mousePos, hoverIntensity, rect) : 0
+  const bgAlpha = 0.08 + depth * 0.03 + hoverGlow * 0.15
+  const borderAlpha = 0.12 + hoverGlow * 0.6
 
   return (
     <div
@@ -86,9 +103,6 @@ export function SpatialNode({
         cursor: 'pointer',
       }}
       onClick={handleClick}
-      onMouseEnter={() => onMouseEnter(node.id)}
-      onMouseLeave={onMouseLeave}
-      onMouseMove={() => onMouseMove(node.id)}
     >
       <div
         style={{
@@ -113,7 +127,7 @@ export function SpatialNode({
         ))}
       </div>
 
-      {showChildren && (
+      {childRects.length > 0 && (
         <div
           style={{
             position: 'absolute',
@@ -132,8 +146,8 @@ export function SpatialNode({
                 key={childRect.id}
                 node={childNode}
                 rect={{
-                  x: childRect.x - (x + NODE_GAP),
-                  y: childRect.y - (y + headerHeight + NODE_GAP),
+                  x: childRect.x - childAreaOrigin.x,
+                  y: childRect.y - childAreaOrigin.y,
                   width: childRect.width - NODE_GAP,
                   height: childRect.height - NODE_GAP,
                 }}
@@ -141,11 +155,8 @@ export function SpatialNode({
                 stateByParent={stateByParent}
                 onClickNode={onClickNode}
                 onClickBackground={onClickBackground}
-                hoveredId={hoveredId}
+                mousePos={mousePos}
                 hoverIntensity={hoverIntensity}
-                onMouseEnter={onMouseEnter}
-                onMouseLeave={onMouseLeave}
-                onMouseMove={onMouseMove}
                 depth={depth + 1}
               />
             )
@@ -154,4 +165,4 @@ export function SpatialNode({
       )}
     </div>
   )
-}
+})

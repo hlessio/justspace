@@ -1,90 +1,81 @@
 import { useRef, useCallback, useEffect, useState } from 'react'
 
-const HOVER_WEIGHT = 0.3
+// Gaussian hover field — cursor has a continuous area of influence.
+// All nodes get hover weight based on distance from cursor.
+// Like FisheyeGrid: no binary hovered/not-hovered.
+
+const IDLE_THRESHOLD = 300
 const RISE_SPEED = 15
 const FALL_SPEED = 2.5
-const IDLE_DELAY = 300
+const HOVER_BOOST = 0.5
+const HOVER_SIGMA = 0.00004 // controls gaussian spread (smaller = wider influence)
 
 export function useHover() {
-  const [hoveredId, setHoveredId] = useState(null)
+  const [mousePos, setMousePos] = useState(null) // { x, y } in viewport pixels
   const [hoverIntensity, setHoverIntensity] = useState(0)
   const intensityRef = useRef(0)
-  const targetRef = useRef(0)
-  const rafRef = useRef(null)
-  const idleTimerRef = useRef(null)
-  const lastTimeRef = useRef(null)
+  const lastMoveTime = useRef(0)
+  const lastFrameTime = useRef(Date.now())
+  const mousePosRef = useRef(null)
 
-  const animate = useCallback(() => {
-    const tick = (timestamp) => {
-      if (!lastTimeRef.current) {
-        lastTimeRef.current = timestamp
-        rafRef.current = requestAnimationFrame(tick)
-        return
-      }
+  // Single rAF loop
+  useEffect(() => {
+    let raf
+    const tick = () => {
+      const now = Date.now()
+      const dt = (now - lastFrameTime.current) / 1000
+      lastFrameTime.current = now
 
-      const dt = (timestamp - lastTimeRef.current) / 1000
-      lastTimeRef.current = timestamp
-      const target = targetRef.current
-      const current = intensityRef.current
-      const diff = target - current
+      const idle = now - lastMoveTime.current > IDLE_THRESHOLD
+      const target = idle ? 0 : 1
+      const cur = intensityRef.current
+      const remaining = Math.abs(target - cur)
 
-      if (Math.abs(diff) < 0.005) {
+      if (remaining > 0.005) {
+        let rate
+        if (target > cur) {
+          rate = RISE_SPEED * dt
+        } else {
+          rate = (0.1 + remaining * remaining * 0.9) * FALL_SPEED * dt
+        }
+        const step = Math.sign(target - cur) * Math.min(rate, remaining)
+        intensityRef.current = Math.max(0, Math.min(1, cur + step))
+        setHoverIntensity(intensityRef.current)
+      } else if (cur !== target) {
         intensityRef.current = target
         setHoverIntensity(target)
-        if (target > 0) {
-          rafRef.current = requestAnimationFrame(tick)
-        } else {
-          rafRef.current = null
-          lastTimeRef.current = null
+        if (target === 0) {
+          mousePosRef.current = null
+          setMousePos(null)
         }
-        return
       }
 
-      const speed = diff > 0 ? RISE_SPEED : FALL_SPEED
-      const remaining = Math.abs(diff)
-      const rate = diff < 0
-        ? (0.1 + remaining * remaining * 0.9) * speed * dt
-        : speed * dt
-      intensityRef.current += Math.sign(diff) * Math.min(rate, remaining)
-      setHoverIntensity(intensityRef.current)
-      rafRef.current = requestAnimationFrame(tick)
+      raf = requestAnimationFrame(tick)
     }
-
-    if (!rafRef.current) {
-      lastTimeRef.current = null
-      rafRef.current = requestAnimationFrame(tick)
-    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [])
 
-  const onNodeEnter = useCallback((nodeId) => {
-    setHoveredId(nodeId)
-    clearTimeout(idleTimerRef.current)
-    targetRef.current = HOVER_WEIGHT
-    animate()
-  }, [animate])
-
-  const onNodeLeave = useCallback(() => {
-    idleTimerRef.current = setTimeout(() => {
-      targetRef.current = 0
-      animate()
-    }, IDLE_DELAY)
-  }, [animate])
-
-  const onNodeMove = useCallback((nodeId) => {
-    if (nodeId !== hoveredId) {
-      setHoveredId(nodeId)
-    }
-    clearTimeout(idleTimerRef.current)
-    targetRef.current = HOVER_WEIGHT
-    animate()
-  }, [hoveredId, animate])
-
-  useEffect(() => {
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      clearTimeout(idleTimerRef.current)
-    }
+  const onMouseMove = useCallback((e) => {
+    const pos = { x: e.clientX, y: e.clientY }
+    mousePosRef.current = pos
+    setMousePos(pos)
+    lastMoveTime.current = Date.now()
   }, [])
 
-  return { hoveredId, hoverIntensity, onNodeEnter, onNodeLeave, onNodeMove }
+  return { mousePos, hoverIntensity, onMouseMove }
+}
+
+// Compute hover weight for a rect based on distance from mouse
+// Returns 0-HOVER_BOOST based on gaussian falloff
+export function computeHoverWeight(mousePos, hoverIntensity, rect) {
+  if (!mousePos || hoverIntensity <= 0) return 0
+
+  const cx = rect.x + rect.width / 2
+  const cy = rect.y + rect.height / 2
+  const dx = mousePos.x - cx
+  const dy = mousePos.y - cy
+  const distSq = dx * dx + dy * dy
+
+  return HOVER_BOOST * Math.exp(-distSq * HOVER_SIGMA) * hoverIntensity
 }

@@ -8,9 +8,6 @@ export function SpatialText({ text, layerName, containerWidth, containerHeight, 
     [containerWidth, layerName]
   )
 
-  if (scale.opacity <= 0) return null
-  if (containerWidth < 10) return null
-
   const font = buildFontString(scale.fontSize)
   const lineHeight = scale.fontSize * 1.3
 
@@ -18,6 +15,10 @@ export function SpatialText({ text, layerName, containerWidth, containerHeight, 
     () => measureText(text, font, containerWidth - scale.padding * 2, lineHeight),
     [text, font, containerWidth, scale.padding, lineHeight]
   )
+
+  // Early returns AFTER all hooks
+  if (scale.opacity <= 0) return null
+  if (containerWidth < 10) return null
 
   const effectiveMaxHeight = maxHeight ?? containerHeight
   if (measurement.height > effectiveMaxHeight) {

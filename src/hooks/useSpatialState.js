@@ -1,24 +1,104 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { createWeightState, applyClick } from '../engine/weights.js'
 import { getBaseWeights } from '../data/tree.js'
 
+const ANIMATION_SPEED = 6   // units per second
+const SETTLE_THRESHOLD = 0.01
+
 export function useSpatialState(tree) {
+  // Build parent map once: nodeId → parentId (for click bubbling)
+  const parentMapRef = useRef(buildParentMap(tree))
+
   const [stateByParent, setStateByParent] = useState(() => {
     return initWeightStates(tree)
   })
 
+  // Single rAF loop — animates all current values toward their targets
+  const stateRef = useRef(stateByParent)
+  stateRef.current = stateByParent
+
+  useEffect(() => {
+    let raf
+    let lastTime = Date.now()
+
+    const tick = () => {
+      const now = Date.now()
+      const dt = (now - lastTime) / 1000
+      lastTime = now
+
+      const state = stateRef.current
+      let anyMoving = false
+      let nextState = null
+
+      for (const [parentId, weightState] of Object.entries(state)) {
+        for (const [nodeId, s] of Object.entries(weightState)) {
+          const diff = s.target - s.current
+          if (Math.abs(diff) > SETTLE_THRESHOLD) {
+            if (!nextState) nextState = deepCloneState(state)
+            const remaining = Math.abs(diff)
+            // Ease-in-out: fast in middle, gentle at edges
+            const rate = (0.1 + remaining * 0.9) * ANIMATION_SPEED * dt
+            nextState[parentId][nodeId].current += Math.sign(diff) * Math.min(rate, remaining)
+            anyMoving = true
+          }
+        }
+      }
+
+      if (nextState) {
+        stateRef.current = nextState
+        setStateByParent(nextState)
+      }
+
+      raf = requestAnimationFrame(tick)
+    }
+
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
   const handleClickNode = useCallback((nodeId, parentId) => {
+    const parentMap = parentMapRef.current
+
     setStateByParent(prev => {
+      let next = { ...prev }
+
+      // 1. Boost the clicked node at its parent level
       const parentState = prev[parentId]
-      if (!parentState) return prev
+      if (parentState) {
+        const parentNode = findNode(tree, parentId)
+        if (parentNode) {
+          const baseWeights = getBaseWeights(parentNode.children)
+          next[parentId] = applyClick(parentState, nodeId, baseWeights)
+        }
+      }
 
-      const parentNode = findNode(tree, parentId)
-      if (!parentNode) return prev
+      // 2. Bubble up: boost ancestors that aren't already expanded.
+      //    If an ancestor is already boosted, we're "inside" it — stop bubbling.
+      let currentId = parentId
+      let grandparentId = parentMap[currentId]
 
-      const baseWeights = getBaseWeights(parentNode.children || parentNode)
-      const nextState = applyClick(parentState, nodeId, baseWeights)
+      while (grandparentId) {
+        const gpState = next[grandparentId]
+        if (gpState && gpState[currentId]) {
+          const s = gpState[currentId]
+          const isAlreadyBoosted = s.target > s.base + 0.5
 
-      return { ...prev, [parentId]: nextState }
+          if (isAlreadyBoosted) {
+            // Already expanded — we're inside this level, stop bubbling
+            break
+          }
+
+          const gpNode = findNode(tree, grandparentId)
+          if (gpNode) {
+            const baseWeights = getBaseWeights(gpNode.children)
+            next[grandparentId] = applyClick(gpState, currentId, baseWeights)
+          }
+        }
+        currentId = grandparentId
+        grandparentId = parentMap[currentId]
+      }
+
+      return next
     })
   }, [tree])
 
@@ -30,7 +110,7 @@ export function useSpatialState(tree) {
       const parentNode = findNode(tree, parentId)
       if (!parentNode) return prev
 
-      const baseWeights = getBaseWeights(parentNode.children || parentNode)
+      const baseWeights = getBaseWeights(parentNode.children)
       const nextState = applyClick(parentState, null, baseWeights)
 
       return { ...prev, [parentId]: nextState }
@@ -38,6 +118,17 @@ export function useSpatialState(tree) {
   }, [tree])
 
   return { stateByParent, handleClickNode, handleClickBackground }
+}
+
+function deepCloneState(state) {
+  const clone = {}
+  for (const [parentId, weightState] of Object.entries(state)) {
+    clone[parentId] = {}
+    for (const [nodeId, s] of Object.entries(weightState)) {
+      clone[parentId][nodeId] = { ...s }
+    }
+  }
+  return clone
 }
 
 function initWeightStates(node) {
@@ -52,6 +143,18 @@ function initWeightStates(node) {
     }
   }
   return states
+}
+
+function buildParentMap(tree) {
+  const map = {} // nodeId → parentId
+  function walk(node) {
+    for (const child of node.children || []) {
+      map[child.id] = node.id
+      walk(child)
+    }
+  }
+  walk(tree)
+  return map
 }
 
 function findNode(tree, id) {
