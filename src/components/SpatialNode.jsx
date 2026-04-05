@@ -195,9 +195,10 @@ export const SpatialNode = memo(function SpatialNode({
   const bgAlpha = 0.06 + depth * 0.025 + hoverGlow * 0.12
   const borderAlpha = 0.1 + hoverGlow * 0.5
 
-  // Compact mode: icon + small title centered together. Only truly icon-only below 20px.
+  // Layout modes based on aspect ratio and size
   const iconOnly = minDim < 20
-  const compact = !iconOnly && minDim < 60
+  const vertical = !iconOnly && width < 50 && height > width * 1.5 // narrow + tall → vertical text
+  const compact = !iconOnly && !vertical && minDim < 60
 
   return (
     <div
@@ -215,7 +216,39 @@ export const SpatialNode = memo(function SpatialNode({
       }}
       onClick={handleClick}
     >
-      {/* Header */}
+      {/* Header — vertical when narrow+tall, horizontal otherwise */}
+      {vertical ? (
+        <div
+          style={{
+            width: '100%',
+            height: height,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '6px 0',
+            gap: 4,
+            overflow: 'hidden',
+            pointerEvents: 'none',
+          }}
+        >
+          {node.icon && (
+            <NodeIcon name={node.icon} size={12} color="#9aabbf" opacity={0.8} />
+          )}
+          <span style={{
+            writingMode: 'vertical-rl',
+            textOrientation: 'upright',
+            fontSize: Math.max(9, Math.min(12, width * 0.3)),
+            color: '#a0aab8',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            maxHeight: height - 30,
+          }}>
+            {node.semanticLayers?.find(l => l.layer === 'identity')?.text || node.label}
+          </span>
+        </div>
+      ) : (
       <div
         style={{
           width: '100%',
@@ -349,6 +382,7 @@ export const SpatialNode = memo(function SpatialNode({
           </div>
         )}
       </div>
+      )}
 
       {/* Detail/body area — notes get full opacity and readable font */}
       {hasDetail && editing && (
