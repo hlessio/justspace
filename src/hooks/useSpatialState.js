@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { createWeightState, applyClick, ensureBoosted } from '../engine/weights.js'
-import { getBaseWeights } from '../data/tree.js'
+import { getBaseWeights } from '../data/defaultTree.js'
 
 const ANIMATION_SPEED = 6   // units per second
 const SETTLE_THRESHOLD = 0.01
@@ -69,6 +69,13 @@ export function useSpatialState(tree) {
         if (parentNode) {
           const baseWeights = getBaseWeights(parentNode.children)
           next[parentId] = applyClick(parentState, nodeId, baseWeights)
+
+          // Reset descendants of siblings that lost focus
+          for (const sibling of parentNode.children) {
+            if (sibling.id !== nodeId) {
+              resetDescendants(next, sibling)
+            }
+          }
         }
       }
 
@@ -110,7 +117,12 @@ export function useSpatialState(tree) {
       const baseWeights = getBaseWeights(parentNode.children)
       const nextState = applyClick(parentState, null, baseWeights)
 
-      return { ...prev, [parentId]: nextState }
+      // Reset all descendants since everything goes back to base
+      const next = { ...prev, [parentId]: nextState }
+      for (const child of parentNode.children) {
+        resetDescendants(next, child)
+      }
+      return next
     })
   }, [tree])
 
@@ -140,6 +152,22 @@ function initWeightStates(node) {
     }
   }
   return states
+}
+
+// Reset all children weights inside a node (and recursively their children)
+function resetDescendants(stateByParent, node) {
+  if (!node.children || node.children.length === 0) return
+  const weightState = stateByParent[node.id]
+  if (weightState) {
+    const reset = {}
+    for (const [id, s] of Object.entries(weightState)) {
+      reset[id] = { ...s, target: s.base }
+    }
+    stateByParent[node.id] = reset
+  }
+  for (const child of node.children) {
+    resetDescendants(stateByParent, child)
+  }
 }
 
 function buildParentMap(tree) {

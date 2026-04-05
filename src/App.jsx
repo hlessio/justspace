@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { SpatialNode } from './components/SpatialNode.jsx'
 import { squarify, computeRowPlan } from './engine/treemap.js'
-import { testTree } from './data/tree.js'
+import { useTree } from './hooks/useTree.js'
 import { useSpatialState } from './hooks/useSpatialState.js'
 import { useHover, computeHoverWeight } from './hooks/useHover.js'
 
@@ -19,7 +19,8 @@ function App() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const { stateByParent, handleClickNode, handleClickBackground } = useSpatialState(testTree)
+  const { tree, updateNodeText, addChild, deleteNode } = useTree()
+  const { stateByParent, handleClickNode, handleClickBackground } = useSpatialState(tree)
   const { mousePos, hoverIntensity, onMouseMove } = useHover()
 
   const containerRect = {
@@ -29,26 +30,24 @@ function App() {
     height: viewport.height - ROOT_PADDING * 2,
   }
 
-  // Row plan: computed ONCE from base weights, never changes
   const rowPlan = useMemo(() => {
-    const baseItems = testTree.children.map(c => ({ id: c.id, weight: c.baseWeight }))
+    if (tree.layout) return tree.layout
+    const baseItems = tree.children.map(c => ({ id: c.id, weight: c.baseWeight }))
     return computeRowPlan(baseItems)
-  }, [])
+  }, [tree.children, tree.layout])
 
-  // Base rects from click weights (no hover) — used for hover distance calc
-  const rootWeightState = stateByParent[testTree.id] || {}
+  const rootWeightState = stateByParent[tree.id] || {}
   const baseRects = useMemo(() => {
-    const weights = testTree.children.map(child => {
+    const weights = tree.children.map(child => {
       const ws = rootWeightState[child.id]
       return { id: child.id, weight: ws ? ws.current : child.baseWeight }
     })
     return squarify(weights, containerRect, rowPlan)
-  }, [rootWeightState, containerRect.width, containerRect.height, rowPlan])
+  }, [rootWeightState, containerRect.width, containerRect.height, rowPlan, tree.children])
 
-  // Final rects with gaussian hover
   const rects = useMemo(() => {
     if (!mousePos || hoverIntensity <= 0) return baseRects
-    const weights = testTree.children.map(child => {
+    const weights = tree.children.map(child => {
       const ws = rootWeightState[child.id]
       const current = ws ? ws.current : child.baseWeight
       const rect = baseRects.find(r => r.id === child.id)
@@ -56,13 +55,13 @@ function App() {
       return { id: child.id, weight: current + hover }
     })
     return squarify(weights, containerRect, rowPlan)
-  }, [baseRects, mousePos, hoverIntensity, rootWeightState, containerRect.width, containerRect.height, rowPlan])
+  }, [baseRects, mousePos, hoverIntensity, rootWeightState, containerRect.width, containerRect.height, rowPlan, tree.children])
 
   const nodeMap = useMemo(() => {
     const map = {}
-    for (const child of testTree.children) map[child.id] = child
+    for (const child of tree.children) map[child.id] = child
     return map
-  }, [])
+  }, [tree.children])
 
   return (
     <div
@@ -75,7 +74,7 @@ function App() {
       }}
       onMouseMove={onMouseMove}
       onClick={(e) => {
-        if (e.target === e.currentTarget) handleClickBackground(testTree.id)
+        if (e.target === e.currentTarget) handleClickBackground(tree.id)
       }}
     >
       {rects.map(rect => {
@@ -86,12 +85,15 @@ function App() {
             key={rect.id}
             node={node}
             rect={{ x: rect.x, y: rect.y, width: rect.width - 4, height: rect.height - 4 }}
-            parentId={testTree.id}
+            parentId={tree.id}
             stateByParent={stateByParent}
             onClickNode={handleClickNode}
             onClickBackground={handleClickBackground}
             mousePos={mousePos}
             hoverIntensity={hoverIntensity}
+            onUpdateText={updateNodeText}
+            onAddChild={addChild}
+            onDeleteNode={deleteNode}
           />
         )
       })}
