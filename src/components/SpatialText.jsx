@@ -2,10 +2,10 @@ import { useMemo } from 'react'
 import { computeScale } from '../engine/semanticScale.js'
 import { measureText, buildFontString } from '../engine/textMeasure.js'
 
-export function SpatialText({ text, layerName, containerWidth, containerHeight, maxHeight }) {
+export function SpatialText({ text, layerName, containerWidth, containerHeight, maxHeight, align = 'center' }) {
   const scale = useMemo(
-    () => computeScale(containerWidth, layerName),
-    [containerWidth, layerName]
+    () => computeScale(containerWidth, layerName, containerHeight),
+    [containerWidth, layerName, containerHeight]
   )
 
   const font = buildFontString(scale.fontSize)
@@ -29,7 +29,7 @@ export function SpatialText({ text, layerName, containerWidth, containerHeight, 
     <div
       style={{
         width: '100%',
-        textAlign: 'center',
+        textAlign: align,
         opacity: scale.opacity,
         fontSize: scale.fontSize,
         lineHeight: `${lineHeight}px`,

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { createWeightState, applyClick } from '../engine/weights.js'
+import { createWeightState, applyClick, ensureBoosted } from '../engine/weights.js'
 import { getBaseWeights } from '../data/tree.js'
 
 const ANIMATION_SPEED = 6   // units per second
@@ -72,30 +72,27 @@ export function useSpatialState(tree) {
         }
       }
 
-      // 2. Bubble up: boost ancestors that aren't already expanded.
-      //    If an ancestor is already boosted, we're "inside" it — stop bubbling.
+      // 2. Bubble up: amplify ancestors with increasing boost per depth level.
+      //    Deeper clicks = ancestors take more space. Never toggles — only expands.
+      const DEPTH_BOOST_BASE = 4.0
+      const DEPTH_BOOST_STEP = 4.0 // each level deeper adds this much more — exponential dominance
       let currentId = parentId
       let grandparentId = parentMap[currentId]
+      let depthFromClick = 1
 
       while (grandparentId) {
         const gpState = next[grandparentId]
         if (gpState && gpState[currentId]) {
-          const s = gpState[currentId]
-          const isAlreadyBoosted = s.target > s.base + 0.5
-
-          if (isAlreadyBoosted) {
-            // Already expanded — we're inside this level, stop bubbling
-            break
-          }
-
           const gpNode = findNode(tree, grandparentId)
           if (gpNode) {
             const baseWeights = getBaseWeights(gpNode.children)
-            next[grandparentId] = applyClick(gpState, currentId, baseWeights)
+            const boost = DEPTH_BOOST_BASE + DEPTH_BOOST_STEP * depthFromClick
+            next[grandparentId] = ensureBoosted(gpState, currentId, baseWeights, boost)
           }
         }
         currentId = grandparentId
         grandparentId = parentMap[currentId]
+        depthFromClick++
       }
 
       return next

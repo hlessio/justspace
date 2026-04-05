@@ -9,11 +9,15 @@ const SCALE_FACTOR = 0.08
 const MIN_FONT = 4
 const TRANSITION_RANGE = 3
 
-export function computeScale(containerWidth, layerName) {
+export function computeScale(containerWidth, layerName, containerHeight) {
   const layer = SEMANTIC_LAYERS[layerName]
   if (!layer) throw new Error(`Unknown layer: ${layerName}`)
 
-  const rawFontSize = containerWidth * layer.W * SCALE_FACTOR
+  // Scale with the constraining dimension — font shrinks when node is compressed in either axis
+  const effectiveSize = containerHeight != null
+    ? Math.min(containerWidth, containerHeight)
+    : containerWidth
+  const rawFontSize = effectiveSize * layer.W * SCALE_FACTOR
   const fontSize = clamp(rawFontSize, MIN_FONT, layer.maxFont)
 
   const opacity = layer.threshold === 0

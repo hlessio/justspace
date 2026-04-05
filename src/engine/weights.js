@@ -2,7 +2,7 @@
 // Click = boost the clicked node, siblings return to base.
 // Everything animates smoothly via rAF.
 
-const CLICK_BOOST = 2.5
+const CLICK_BOOST = 4.0
 
 export function createWeightState(ids, baseWeights) {
   const state = {}
@@ -44,6 +44,22 @@ export function applyClick(state, clickedId, baseWeights) {
     }
   }
 
+  return next
+}
+
+// Like applyClick but never toggles — only ensures the node is boosted.
+// Used for ancestor amplification when clicking deeper.
+export function ensureBoosted(state, nodeId, baseWeights, boost) {
+  const next = {}
+  for (const id of Object.keys(state)) {
+    const idBase = baseWeights[id] ?? 1.0
+    if (id === nodeId) {
+      next[id] = { ...state[id], target: idBase + boost }
+    } else {
+      // Siblings go to base
+      next[id] = { ...state[id], target: idBase }
+    }
+  }
   return next
 }
 

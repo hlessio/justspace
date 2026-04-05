@@ -1,10 +1,13 @@
 import { useMemo, useCallback, memo } from 'react'
 import { SpatialText } from './SpatialText.jsx'
+import { NodeIcon } from './NodeIcon.jsx'
 import { squarify, computeRowPlan } from '../engine/treemap.js'
 import { computeHoverWeight } from '../hooks/useHover.js'
+import { computeScale } from '../engine/semanticScale.js'
 
 const NODE_GAP = 2
 const MIN_CHILD_SIZE = 20
+const ICON_SIZE = 14 // fixed, never scales
 
 export const SpatialNode = memo(function SpatialNode({
   node,
@@ -18,10 +21,29 @@ export const SpatialNode = memo(function SpatialNode({
   depth = 0,
 }) {
   const { x, y, width, height } = rect
-
   const childWeightState = stateByParent[node.id] || {}
+  const hasChildNodes = node.children && node.children.length > 0
+  const minDim = Math.min(width, height)
 
-  const headerHeight = Math.min(height * 0.3, 60)
+  // What text can we show? Font scales with the constraining dimension.
+  const identityScale = computeScale(width, 'identity', height)
+  const contextScale = computeScale(width, 'context', height)
+  const showIdentityText = identityScale.fontSize >= 6 && minDim > 30
+  const showContextText = contextScale.opacity > 0 && minDim > 50
+
+  // Header height: adapts to content, leaves room for children
+  const textHeight = showIdentityText
+    ? identityScale.fontSize * 1.3 + (showContextText ? contextScale.fontSize * 1.3 + 4 : 0)
+    : 0
+  const headerContentHeight = Math.max(ICON_SIZE + 4, textHeight + 8)
+
+  let headerHeight
+  if (!hasChildNodes || minDim < MIN_CHILD_SIZE * 2) {
+    headerHeight = height // no children — header is everything
+  } else {
+    headerHeight = Math.min(height * 0.35, Math.max(24, headerContentHeight))
+  }
+
   const childAreaOrigin = { x: x + NODE_GAP, y: y + headerHeight + NODE_GAP }
   const childrenRect = {
     ...childAreaOrigin,
@@ -29,33 +51,29 @@ export const SpatialNode = memo(function SpatialNode({
     height: Math.max(0, height - headerHeight - NODE_GAP * 2),
   }
 
-  const hasChildren = node.children && node.children.length > 0
+  const canShowChildren = hasChildNodes
     && childrenRect.width > MIN_CHILD_SIZE
     && childrenRect.height > MIN_CHILD_SIZE
 
-  // Row plan: computed ONCE from base weights — fixed layout structure
-  // Independent of container size — never changes when parent resizes
+  // Row plan: fixed from base weights
   const rowPlan = useMemo(() => {
-    if (!hasChildren) return null
+    if (!canShowChildren) return null
     const baseItems = node.children.map(c => ({ id: c.id, weight: c.baseWeight }))
     return computeRowPlan(baseItems)
-  }, [hasChildren, node.children])
+  }, [canShowChildren, node.children])
 
-  // Base rects from click weights (for hover distance calc)
   const baseChildRects = useMemo(() => {
-    if (!hasChildren) return []
+    if (!canShowChildren) return []
     const weights = node.children.map(child => {
       const ws = childWeightState[child.id]
       return { id: child.id, weight: ws ? ws.current : child.baseWeight }
     })
     return squarify(weights, childrenRect, rowPlan)
-  }, [hasChildren, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
+  }, [canShowChildren, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
 
-  // Final rects with gaussian hover
   const childRects = useMemo(() => {
-    if (!hasChildren) return []
+    if (!canShowChildren) return []
     if (!mousePos || hoverIntensity <= 0) return baseChildRects
-
     const weights = node.children.map(child => {
       const ws = childWeightState[child.id]
       const current = ws ? ws.current : child.baseWeight
@@ -64,7 +82,7 @@ export const SpatialNode = memo(function SpatialNode({
       return { id: child.id, weight: current + hover }
     })
     return squarify(weights, childrenRect, rowPlan)
-  }, [hasChildren, baseChildRects, mousePos, hoverIntensity, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
+  }, [canShowChildren, baseChildRects, mousePos, hoverIntensity, node.children, childWeightState, childrenRect.x, childrenRect.y, childrenRect.width, childrenRect.height, rowPlan])
 
   const childNodeMap = useMemo(() => {
     const map = {}
@@ -85,8 +103,11 @@ export const SpatialNode = memo(function SpatialNode({
   }, [node.id, onClickBackground])
 
   const hoverGlow = mousePos ? computeHoverWeight(mousePos, hoverIntensity, rect) : 0
-  const bgAlpha = 0.08 + depth * 0.03 + hoverGlow * 0.15
-  const borderAlpha = 0.12 + hoverGlow * 0.6
+  const bgAlpha = 0.06 + depth * 0.025 + hoverGlow * 0.12
+  const borderAlpha = 0.1 + hoverGlow * 0.5
+
+  // Icon-only: very small node
+  const iconOnly = minDim < 30 || !showIdentityText
 
   return (
     <div
@@ -96,7 +117,7 @@ export const SpatialNode = memo(function SpatialNode({
         top: y,
         width,
         height,
-        borderRadius: Math.max(4, Math.min(12, width * 0.02)),
+        borderRadius: Math.max(4, Math.min(12, minDim * 0.06)),
         background: `rgba(140, 160, 200, ${bgAlpha})`,
         border: `1px solid rgba(140, 180, 255, ${borderAlpha})`,
         overflow: 'hidden',
@@ -104,29 +125,66 @@ export const SpatialNode = memo(function SpatialNode({
       }}
       onClick={handleClick}
     >
+      {/* Header — flows horizontally when there's space */}
       <div
         style={{
           width: '100%',
           height: headerHeight,
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
+          alignItems: iconOnly ? 'center' : 'flex-start',
+          justifyContent: iconOnly ? 'center' : 'flex-start',
+          padding: iconOnly ? 0 : '6px 8px',
+          gap: 6,
           pointerEvents: 'none',
+          overflow: 'hidden',
         }}
       >
-        {(node.semanticLayers || []).map(({ layer, text }) => (
-          <SpatialText
-            key={layer}
-            text={text}
-            layerName={layer}
-            containerWidth={width}
-            containerHeight={headerHeight}
-            maxHeight={headerHeight / (node.semanticLayers?.length || 1)}
+        {/* Icon: fixed small size */}
+        {node.icon && (
+          <NodeIcon
+            name={node.icon}
+            size={ICON_SIZE}
+            color={iconOnly ? '#7888a0' : '#9aabbf'}
+            opacity={0.8}
           />
-        ))}
+        )}
+
+        {/* Text container: takes remaining horizontal space, flows vertically inside */}
+        {!iconOnly && (
+          <div style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: 1,
+            overflow: 'hidden',
+          }}>
+            {showIdentityText && (
+              <SpatialText
+                text={node.semanticLayers?.find(l => l.layer === 'identity')?.text || node.label}
+                layerName="identity"
+                containerWidth={width}
+                containerHeight={height}
+                maxHeight={identityScale.fontSize * 1.5}
+                align="left"
+              />
+            )}
+            {showContextText && (
+              <SpatialText
+                text={node.semanticLayers?.find(l => l.layer === 'context')?.text || ''}
+                layerName="context"
+                containerWidth={width}
+                containerHeight={height}
+                maxHeight={contextScale.fontSize * 1.5}
+                align="left"
+              />
+            )}
+          </div>
+        )}
       </div>
 
+      {/* Children treemap */}
       {childRects.length > 0 && (
         <div
           style={{
