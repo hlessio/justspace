@@ -410,6 +410,11 @@ export const SpatialNode = memo(function SpatialNode({
           onClick={handleChildAreaClick}
         >
           {childRects.map(childRect => {
+            // Virtualization: skip nodes too small to see or interact with
+            const cw = childRect.width - NODE_GAP
+            const ch = childRect.height - NODE_GAP
+            if (cw < 8 || ch < 8) return null
+
             const childNode = childNodeMap[childRect.id]
             if (!childNode) return null
             return (
@@ -419,8 +424,8 @@ export const SpatialNode = memo(function SpatialNode({
                 rect={{
                   x: childRect.x - childAreaOrigin.x,
                   y: childRect.y - childAreaOrigin.y,
-                  width: childRect.width - NODE_GAP,
-                  height: childRect.height - NODE_GAP,
+                  width: cw,
+                  height: ch,
                 }}
                 parentId={node.id}
                 stateByParent={stateByParent}
