@@ -163,41 +163,8 @@ export const SpatialNode = memo(function SpatialNode({
         overflow: 'hidden',
         cursor: 'pointer',
       }}
-      onClick={node.type === 'search' ? undefined : handleClick}
+      onClick={handleClick}
     >
-      {/* Search node — special rendering */}
-      {node.type === 'search' ? (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 12px',
-            gap: 8,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <NodeIcon name="Search" size={ICON_SIZE} color="#667788" opacity={0.7} />
-          {height > 20 && (
-            <input
-              type="text"
-              placeholder="Cerca..."
-              style={{
-                flex: 1,
-                background: 'none',
-                border: 'none',
-                outline: 'none',
-                color: '#c8d0dc',
-                fontSize: Math.max(11, Math.min(identityScale.fontSize, 15)),
-                fontFamily: 'inherit',
-                padding: 0,
-              }}
-            />
-          )}
-        </div>
-      ) : (
-      <>
       {/* Header */}
       <div
         style={{
@@ -373,8 +340,6 @@ export const SpatialNode = memo(function SpatialNode({
             )
           })}
         </div>
-      )}
-      </>
       )}
     </div>
   )

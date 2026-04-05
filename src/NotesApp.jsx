@@ -1,26 +1,24 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { SpatialNode } from './components/SpatialNode.jsx'
 import { squarify, computeRowPlan } from './engine/treemap.js'
 import { useTree } from './hooks/useTree.js'
 import { useSpatialState } from './hooks/useSpatialState.js'
 import { useHover, computeHoverWeight } from './hooks/useHover.js'
-// Notes App — same spatial engine, different tree shape.
-// Everything is a node — including search.
+import { NodeIcon } from './components/NodeIcon.jsx'
 
+// Notes App — same spatial engine, different tree shape.
+// Search bar at top, then the spatial field below.
+
+const SEARCH_HEIGHT = 52
 const PADDING = 8
 
 const defaultNotesTree = {
   id: 'root',
   label: 'Root',
   baseWeight: 1,
-  // Search on top row (full width), folders below
-  layout: [['search'], ['f-inbox'], ['f-progetti'], ['f-personale']],
+  // Explicit layout: vertical list — each folder is its own row
+  layout: [['f-inbox'], ['f-progetti'], ['f-personale']],
   children: [
-    {
-      id: 'search', label: 'Search', icon: 'Search', baseWeight: 0.15, type: 'search',
-      semanticLayers: [{ layer: 'identity', text: 'Cerca...' }],
-      children: [],
-    },
     {
       id: 'f-inbox', label: 'Inbox', icon: 'Inbox', baseWeight: 0.8,
       // Notes inside also vertical
@@ -64,6 +62,7 @@ const defaultNotesTree = {
 
 export default function NotesApp() {
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight })
+  const [search, setSearch] = useState('')
   const [autoLayout, setAutoLayout] = useState(false)
 
   useEffect(() => {
@@ -82,14 +81,49 @@ export default function NotesApp() {
     return tree.children?.[0]?.id === 'f-inbox' ? tree : defaultNotesTree
   }, [tree])
 
-  const { stateByParent, handleClickNode, handleClickBackground } = useSpatialState(notesTree)
+  const { stateByParent, handleClickNode, handleClickBackground, focusNode } = useSpatialState(notesTree)
   const { mousePos, hoverIntensity, onMouseMove } = useHover()
+
+  // Search: find matching nodes and focus the best match
+  const searchTimer = useRef(null)
+  const lastSearchRef = useRef('')
+
+  const findMatchingNodes = useCallback((query) => {
+    if (!query.trim()) return []
+    const q = query.toLowerCase()
+    const matches = []
+    const walk = (node) => {
+      const texts = (node.semanticLayers || []).map(l => l.text.toLowerCase()).join(' ')
+      const label = (node.label || '').toLowerCase()
+      if (texts.includes(q) || label.includes(q)) {
+        matches.push(node.id)
+      }
+      for (const child of node.children || []) walk(child)
+    }
+    walk(notesTree)
+    return matches
+  }, [notesTree])
+
+  useEffect(() => {
+    if (!search.trim()) {
+      if (lastSearchRef.current) {
+        handleClickBackground(notesTree.id)
+        lastSearchRef.current = ''
+      }
+      return
+    }
+    const matches = findMatchingNodes(search)
+    if (matches.length > 0 && search !== lastSearchRef.current) {
+      focusNode(matches[0])
+      lastSearchRef.current = search
+    }
+  }, [search, findMatchingNodes, focusNode, handleClickBackground, notesTree.id])
 
   const containerRect = {
     x: PADDING,
-    y: PADDING,
+    y: SEARCH_HEIGHT + PADDING,
     width: viewport.width - PADDING * 2,
-    height: viewport.height - PADDING * 2,
+    height: viewport.height - SEARCH_HEIGHT - PADDING * 2,
   }
 
   const rowPlan = useMemo(() => {
@@ -139,7 +173,37 @@ export default function NotesApp() {
         if (e.target === e.currentTarget) handleClickBackground(notesTree.id)
       }}
     >
-      {/* Spatial field — everything is a node, including search */}
+      {/* Search bar */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, width: viewport.width, height: SEARCH_HEIGHT,
+        display: 'flex', alignItems: 'center', padding: '0 16px', gap: 10,
+        borderBottom: '1px solid rgba(140, 180, 255, 0.08)',
+      }}>
+        <NodeIcon name="Search" size={16} color="#667788" />
+        <input
+          type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cerca..."
+          style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#c8d0dc', fontSize: 15, fontFamily: 'inherit' }}
+        />
+        <div
+          onClick={() => setAutoLayout(prev => !prev)}
+          style={{
+            padding: '4px 8px',
+            borderRadius: 4,
+            fontSize: 11,
+            color: autoLayout ? '#9aabbf' : '#556677',
+            cursor: 'pointer',
+            border: `1px solid rgba(140, 180, 255, ${autoLayout ? 0.2 : 0.08})`,
+            background: autoLayout ? 'rgba(140, 160, 200, 0.1)' : 'none',
+            whiteSpace: 'nowrap',
+            userSelect: 'none',
+          }}
+        >
+          {autoLayout ? 'auto' : 'lista'}
+        </div>
+      </div>
+
+      {/* Spatial field — same engine */}
       {rects.map(rect => {
         const node = nodeMap[rect.id]
         if (!node) return null

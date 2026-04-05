@@ -126,7 +126,16 @@ export function useSpatialState(tree) {
     })
   }, [tree])
 
-  return { stateByParent, handleClickNode, handleClickBackground }
+  // Focus a node by id — same as clicking it, but you don't need to know the parentId
+  const focusNode = useCallback((nodeId) => {
+    const parentMap = parentMapRef.current
+    const parentId = parentMap[nodeId]
+    if (parentId) {
+      handleClickNode(nodeId, parentId)
+    }
+  }, [handleClickNode])
+
+  return { stateByParent, handleClickNode, handleClickBackground, focusNode }
 }
 
 function deepCloneState(state) {
