@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { SpatialNode } from './components/SpatialNode.jsx'
 import { squarify, computeRowPlan } from './engine/treemap.js'
 import { useTree } from './hooks/useTree.js'
+import { useFileSystemTree } from './hooks/useFileSystemTree.js'
 import { defaultNotesTree } from './data/defaultNotesTree.js'
 import { useSpatialState } from './hooks/useSpatialState.js'
 import { useHover, computeHoverWeight } from './hooks/useHover.js'
@@ -21,17 +22,22 @@ export default function NotesApp() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  const { tree, updateNodeText, addFolder, addNote, deleteNode } = useTree({
-    storageKey: 'spatial-notes-tree',
-    defaultTree: defaultNotesTree,
-  })
+  // Two modes: file system or localStorage fallback
+  const fs = useFileSystemTree()
+  const local = useTree({ storageKey: 'spatial-notes-tree', defaultTree: defaultNotesTree })
+
+  const useFS = fs.tree !== null
+  const tree = useFS ? fs.tree : local.tree
+  const updateNodeText = useFS ? fs.updateNodeText : local.updateNodeText
+  const addNote = useFS ? fs.addNote : local.addNote
+  const addFolder = useFS ? fs.addFolder : local.addFolder
+  const deleteNode = useFS ? fs.deleteNode : local.deleteNode
 
   const { stateByParent, handleClickNode, handleClickBackground, focusNode } = useSpatialState(tree)
   const { mousePos, hoverIntensity, onMouseMove } = useHover()
 
-  // Search: find matching nodes and focus the best match
+  // Search
   const lastSearchRef = useRef('')
-
   const findMatchingNodes = useCallback((query) => {
     if (!query.trim()) return []
     const q = query.toLowerCase()
@@ -61,6 +67,7 @@ export default function NotesApp() {
     }
   }, [search, findMatchingNodes, focusNode, handleClickBackground, tree.id])
 
+  // Layout
   const containerRect = {
     x: PADDING,
     y: SEARCH_HEIGHT + PADDING,
@@ -127,6 +134,25 @@ export default function NotesApp() {
           placeholder="Cerca..."
           style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#c8d0dc', fontSize: 15, fontFamily: 'inherit' }}
         />
+
+        {/* Open folder / status */}
+        <div
+          onClick={fs.openDirectory}
+          title={useFS ? `${fs.dirName} — clicca per cambiare` : 'Apri cartella'}
+          style={{
+            padding: '4px 8px', borderRadius: 4, fontSize: 11,
+            color: useFS ? '#9aabbf' : '#556677', cursor: 'pointer',
+            border: `1px solid rgba(140, 180, 255, ${useFS ? 0.2 : 0.08})`,
+            background: useFS ? 'rgba(140, 160, 200, 0.1)' : 'none',
+            whiteSpace: 'nowrap', userSelect: 'none',
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}
+        >
+          <NodeIcon name={useFS ? 'FolderOpen' : 'FolderInput'} size={12} color={useFS ? '#9aabbf' : '#556677'} />
+          {useFS ? fs.dirName : 'Apri cartella'}
+        </div>
+
+        {/* Layout toggle */}
         <div
           onClick={() => setAutoLayout(prev => !prev)}
           style={{
@@ -139,7 +165,30 @@ export default function NotesApp() {
         >
           {autoLayout ? 'auto' : 'lista'}
         </div>
+
+        {/* Refresh */}
+        {useFS && (
+          <div
+            onClick={fs.refresh}
+            title="Ricarica dal disco"
+            style={{ cursor: 'pointer', display: 'flex', opacity: 0.5 }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = 1}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = 0.5}
+          >
+            <NodeIcon name="RefreshCw" size={14} color="#667788" />
+          </div>
+        )}
       </div>
+
+      {/* Loading */}
+      {fs.loading && (
+        <div style={{
+          position: 'absolute', top: SEARCH_HEIGHT, left: 0, width: '100%',
+          padding: '8px 16px', fontSize: 12, color: '#667788',
+        }}>
+          Caricamento...
+        </div>
+      )}
 
       {/* Spatial field */}
       {rects.map(rect => {
